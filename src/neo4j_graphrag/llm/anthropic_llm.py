@@ -87,7 +87,7 @@ class AnthropicLLM(LLMInterface):
                 ],
                 **self.model_params,
             )
-            return LLMResponse(content=response.content)
+            return LLMResponse(content=response.content[0].text)
         except APIError as e:
             raise LLMGenerationError(e)
 
@@ -111,6 +111,6 @@ class AnthropicLLM(LLMInterface):
                 ],
                 **self.model_params,
             )
-            return LLMResponse(content=response.content)
+            return LLMResponse(content=response.content[0].text)
         except APIError as e:
             raise LLMGenerationError(e)

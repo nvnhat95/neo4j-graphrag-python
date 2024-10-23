@@ -1,17 +1,6 @@
-#  Copyright (c) "Neo4j"
-#  Neo4j Sweden AB [https://neo4j.com]
-#  #
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
-#  #
-#      https://www.apache.org/licenses/LICENSE-2.0
-#  #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+# This modifies the original code from
+# https://github.com/neo4j/neo4j-graphrag-python/blob/main/src/neo4j_graphrag/experimental/components/entity_relation_extractor.py
+# to feed list of current named entities in KG to LLM prompt to avoid duplicated named entities generation
 from __future__ import annotations
 
 import abc
@@ -24,23 +13,44 @@ import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import ValidationError, validate_call
-
 from neo4j_graphrag.exceptions import LLMGenerationError
 from neo4j_graphrag.experimental.components.pdf_loader import DocumentInfo
 from neo4j_graphrag.experimental.components.schema import SchemaConfig
-from neo4j_graphrag.experimental.components.types import (
-    Neo4jGraph,
-    Neo4jNode,
-    Neo4jRelationship,
-    TextChunk,
-    TextChunks,
-)
+from neo4j_graphrag.experimental.components.types import (Neo4jGraph,
+                                                          Neo4jNode,
+                                                          Neo4jRelationship,
+                                                          TextChunk,
+                                                          TextChunks)
 from neo4j_graphrag.experimental.pipeline.component import Component
-from neo4j_graphrag.generation.prompts import ERExtractionTemplate, PromptTemplate
+from neo4j_graphrag.generation.prompts import (ERExtractionTemplate,
+                                               PromptTemplate)
 from neo4j_graphrag.llm import LLMInterface
+from pydantic import ValidationError, validate_call
 
 logger = logging.getLogger(__name__)
+
+PROMPT_TEMPLATE_FOR_EREXTRACTION = """
+You are a top-tier algorithm designed for extracting information in structured formats to build a knowledge graph. Extract the entities (nodes) and specify their type from the given text. Also extract the relationships between these nodes.
+
+Return JSON in the following format:
+{{"nodes": [ {{"id": "0", "label": "Person", "properties": {{"name": "John"}} }}],
+"relationships": [{{"type": "OWNS", "start_node_id": "0", "end_node_id": "1", "properties": {{"timestamp": "2024-08-01"}} }}] }}
+
+Use only fhe following nodes and relationships:
+{schema}
+
+Assign a unique ID (string) to each node, and reuse it to define relationships. Do respect the source and target node types for relationship and
+the relationship direction.
+
+List of current entities in knowledge graph:
+{current_entities}
+
+Input text:
+
+{text}
+
+Only output the JSON, nothing else.
+"""
 
 
 class OnError(enum.Enum):
@@ -308,7 +318,7 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
     def __init__(
         self,
         llm: LLMInterface,
-        prompt_template: ERExtractionTemplate | str = ERExtractionTemplate(),
+        prompt_template: ERExtractionTemplate | str = PROMPT_TEMPLATE_FOR_EREXTRACTION,
         create_lexical_graph: bool = True,
         on_error: OnError = OnError.RAISE,
         max_concurrency: int = 5,
@@ -323,12 +333,22 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         self.prompt_template = template
 
     async def extract_for_chunk(
-        self, schema: SchemaConfig, examples: str, chunk: TextChunk
+        self,
+        schema: SchemaConfig,
+        examples: str,
+        chunk: TextChunk,
+        current_entities: Any = None,
     ) -> Neo4jGraph:
         """Run entity extraction for a given text chunk."""
         prompt = self.prompt_template.format(
-            text=chunk.text, schema=schema.model_dump(), examples=examples
+            text=chunk.text,
+            schema=schema.model_dump(),
+            examples=examples,
+            current_entities=current_entities,
         )
+        # print("=" * 30)
+        # print(prompt)
+
         llm_result = await self.llm.ainvoke(prompt)
         try:
             result = json.loads(llm_result.content)
@@ -349,6 +369,10 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
                         f"LLM response is not valid JSON {llm_result.content} for chunk_index={chunk.index}"
                     )
                 result = {"nodes": [], "relationships": []}
+        
+        print("=" * 30)
+        print(result)
+        
         try:
             chunk_graph = Neo4jGraph(**result)
         except ValidationError as e:
@@ -400,10 +424,13 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         examples: str,
         lexical_graph_builder: Optional[LexicalGraphBuilder] = None,
         document_id: Optional[str] = None,
+        current_entities: Any = None,
     ) -> Neo4jGraph:
         """Run extraction and post processing for a single chunk"""
         async with sem:
-            chunk_graph = await self.extract_for_chunk(schema, examples, chunk)
+            chunk_graph = await self.extract_for_chunk(
+                schema, examples, chunk, current_entities
+            )
             await self.post_process_chunk(
                 chunk_graph, chunk, run_id, lexical_graph_builder, document_id
             )
@@ -416,6 +443,7 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         document_info: Optional[DocumentInfo] = None,
         schema: Union[SchemaConfig, None] = None,
         examples: str = "",
+        current_entities: Any = None,
         **kwargs: Any,
     ) -> Neo4jGraph:
         """Perform entity and relation extraction for all chunks in a list."""
@@ -441,7 +469,14 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         sem = asyncio.Semaphore(self.max_concurrency)
         tasks = [
             self.run_for_chunk(
-                sem, run_id, chunk, schema, examples, lexical_graph_builder, document_id
+                sem,
+                run_id,
+                chunk,
+                schema,
+                examples,
+                lexical_graph_builder,
+                document_id,
+                current_entities,
             )
             for chunk in chunks.chunks
         ]

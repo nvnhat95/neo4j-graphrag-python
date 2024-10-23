@@ -14,7 +14,7 @@
 #  limitations under the License.
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Tuple
 
 from pydantic import BaseModel, ValidationError, model_validator, validate_call
 
@@ -27,7 +27,7 @@ class SchemaProperty(BaseModel):
     Represents a property on a node or relationship in the graph.
     """
 
-    name: str
+    name: str = None
     # See https://neo4j.com/docs/cypher-manual/current/values-and-types/property-structural-constructed/#property-types
     type: Literal[
         "BOOLEAN",
@@ -42,9 +42,8 @@ class SchemaProperty(BaseModel):
         "STRING",
         "ZONED_DATETIME",
         "ZONED_TIME",
-    ]
+    ] = "STRING"
     description: str = ""
-
 
 class SchemaEntity(BaseModel):
     """
@@ -72,8 +71,8 @@ class SchemaConfig(DataModel):
     """
 
     entities: Dict[str, Dict[str, Any]]
-    relations: Optional[Dict[str, Dict[str, Any]]]
-    potential_schema: Optional[List[Tuple[str, str, str]]]
+    relations: Dict[str, Dict[str, Any]]
+    potential_schema: List[Tuple[str, str, str]]
 
     @model_validator(mode="before")
     def check_schema(cls, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -81,26 +80,50 @@ class SchemaConfig(DataModel):
         relations = data.get("relations", {}).keys()
         potential_schema = data.get("potential_schema", [])
 
-        if potential_schema:
-            if not relations:
+        for entity1, relation, entity2 in potential_schema:
+            if entity1 not in entities:
                 raise SchemaValidationError(
-                    "Relations must also be provided when using a potential schema."
+                    f"Entity '{entity1}' is not defined in the provided entities."
                 )
-            for entity1, relation, entity2 in potential_schema:
-                if entity1 not in entities:
-                    raise SchemaValidationError(
-                        f"Entity '{entity1}' is not defined in the provided entities."
-                    )
-                if relation not in relations:
-                    raise SchemaValidationError(
-                        f"Relation '{relation}' is not defined in the provided relations."
-                    )
-                if entity2 not in entities:
-                    raise SchemaValidationError(
-                        f"Entity '{entity2}' is not defined in the provided entities."
-                    )
+            if relation not in relations:
+                raise SchemaValidationError(
+                    f"Relation '{relation}' is not defined in the provided relations."
+                )
+            if entity2 not in entities:
+                raise SchemaValidationError(
+                    f"Entity '{entity2}' is not defined in the provided entities."
+                )
 
         return data
+
+    def __str__(self):
+        def format_schema(entities, relations, potential_schema):
+            # Format entities
+            entities_str = "entities = [\n"
+            for key, value in entities.items():
+                entities_str += f"\t{key}: {value['description']}\n"
+            entities_str += "]\n"
+            
+            # Format relations
+            relations_str = "relations = [\n"
+            for key, value in relations.items():
+                relations_str += f"\t{key}: {value['description']}\n"
+                if value.get('properties'):
+                    relations_str += "\t\tproperties:[\n"
+                    for prop in value['properties']:
+                        relations_str += f'\t\t\t{str(prop)}\n'
+                    relations_str += "\t\t]\n"
+            relations_str += "]\n"
+            
+            # Format potential relations
+            potential_relations_str = "potential_relations = [\n"
+            for rel in potential_schema:
+                potential_relations_str += f"\t({rel[0]}, {rel[1]}, {rel[2]}),\n"
+            potential_relations_str += "]\n"
+            
+            return entities_str + relations_str + potential_relations_str
+
+        return format_schema(self.entities, self.relations, self.potential_schema)
 
 
 class SchemaBuilder(Component):
@@ -165,8 +188,8 @@ class SchemaBuilder(Component):
     @staticmethod
     def create_schema_model(
         entities: List[SchemaEntity],
-        relations: Optional[List[SchemaRelation]] = None,
-        potential_schema: Optional[List[Tuple[str, str, str]]] = None,
+        relations: List[SchemaRelation],
+        potential_schema: List[Tuple[str, str, str]],
     ) -> SchemaConfig:
         """
         Creates a SchemaConfig object from Lists of Entity and Relation objects
@@ -181,11 +204,9 @@ class SchemaBuilder(Component):
             SchemaConfig: A configured schema object.
         """
         entity_dict = {entity.label: entity.model_dump() for entity in entities}
-        relation_dict = (
-            {relation.label: relation.model_dump() for relation in relations}
-            if relations
-            else {}
-        )
+        relation_dict = {
+            relation.label: relation.model_dump() for relation in relations
+        }
 
         try:
             return SchemaConfig(
@@ -200,8 +221,8 @@ class SchemaBuilder(Component):
     async def run(
         self,
         entities: List[SchemaEntity],
-        relations: Optional[List[SchemaRelation]] = None,
-        potential_schema: Optional[List[Tuple[str, str, str]]] = None,
+        relations: List[SchemaRelation],
+        potential_schema: List[Tuple[str, str, str]],
     ) -> SchemaConfig:
         """
         Asynchronously constructs and returns a SchemaConfig object.

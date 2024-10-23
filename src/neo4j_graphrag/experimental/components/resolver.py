@@ -75,10 +75,12 @@ class SinglePropertyExactMatchResolver(EntityResolver):
         filter_query: Optional[str] = None,
         resolve_property: str = "name",
         neo4j_database: Optional[str] = None,
+        merge_relationships: bool = True,
     ) -> None:
         super().__init__(driver, filter_query)
         self.resolve_property = resolve_property
         self.database = neo4j_database
+        self.merge_relationships = merge_relationships
 
     async def run(self) -> ResolutionStats:
         """Resolve entities based on the following rule:
@@ -125,7 +127,7 @@ class SinglePropertyExactMatchResolver(EntityResolver):
             # different values, only one of them is kept in the created node
             "CALL apoc.refactor.mergeNodes(entities,{ "
             " properties:'discard', "
-            " mergeRels:true "
+            f" mergeRels:{self.merge_relationships} "
             "}) "
             "YIELD node "
             "RETURN count(node) as c "
