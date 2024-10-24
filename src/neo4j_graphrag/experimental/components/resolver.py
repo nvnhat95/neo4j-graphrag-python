@@ -140,14 +140,14 @@ class SinglePropertyExactMatchResolver(EntityResolver):
         number_of_created_nodes = records[0].get("c")
 
         if self.merge_relationships:
-            await self.remove_duplicate_relationships()
+            await self.remove_duplicated_relationships()
 
         return ResolutionStats(
             number_of_nodes_to_resolve=number_of_nodes_to_resolve,
             number_of_created_nodes=number_of_created_nodes,
         )
 
-    async def remove_duplicate_relationships(self) -> int:
+    async def remove_duplicated_relationships(self) -> int:
         """
         Removes all duplicate relationships in the graph.
         Two relationships are considered duplicates if they have the same type,
