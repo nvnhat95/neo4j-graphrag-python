@@ -138,7 +138,37 @@ class SinglePropertyExactMatchResolver(EntityResolver):
             database_=self.database,
         )
         number_of_created_nodes = records[0].get("c")
+
+        if self.merge_relationships:
+            await self.remove_duplicate_relationships()
+
         return ResolutionStats(
             number_of_nodes_to_resolve=number_of_nodes_to_resolve,
             number_of_created_nodes=number_of_created_nodes,
+        )
+
+    async def remove_duplicate_relationships(self) -> int:
+        """
+        Removes all duplicate relationships in the graph.
+        Two relationships are considered duplicates if they have the same type,
+        same properties, and connect the same nodes.
+
+        Returns:
+            int: The number of relationships removed.
+        """
+        query = """
+        MATCH (n)-[r]->(m)
+        WITH n, m, r, properties(r) AS props, count(r) AS cnt
+        WITH n, m, props, collect(r) AS rels
+        WHERE size(rels) > 1
+        // Keep only the first relationship and remove the rest
+        WITH rels[1..] AS toDelete
+        UNWIND toDelete AS rel
+        DELETE rel
+        """
+        
+        records, _, _ = await execute_query(
+            self.driver,
+            query,
+            database_=self.database,
         )
