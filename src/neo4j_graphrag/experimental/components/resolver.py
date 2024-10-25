@@ -13,7 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 import abc
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Dict
 
 import neo4j
 
@@ -73,12 +73,12 @@ class SinglePropertyExactMatchResolver(EntityResolver):
         self,
         driver: Union[neo4j.Driver, neo4j.AsyncDriver],
         filter_query: Optional[str] = None,
-        resolve_property: str = "name",
+        resolve_properties: Dict[str, str] = None,
         neo4j_database: Optional[str] = None,
         merge_relationships: bool = True,
     ) -> None:
         super().__init__(driver, filter_query)
-        self.resolve_property = resolve_property
+        self.resolve_properties = resolve_properties or {"default": "name"}
         self.database = neo4j_database
         self.merge_relationships = merge_relationships
 
@@ -92,6 +92,8 @@ class SinglePropertyExactMatchResolver(EntityResolver):
 
         See apoc.refactor.mergeNodes documentation for more details.
         """
+        print(f"Debug: resolve_properties = {self.resolve_properties}")
+
         match_query = "MATCH (entity:__Entity__) "
         if self.filter_query:
             match_query += self.filter_query
@@ -106,25 +108,40 @@ class SinglePropertyExactMatchResolver(EntityResolver):
             return ResolutionStats(
                 number_of_nodes_to_resolve=0,
             )
+        # merge_nodes_query = (
+        #     f"{match_query} "
+        #     f"WITH entity, entity.{self.resolve_property} as prop "
+        #     # keep only entities for which the resolve_property (name) is not null
+        #     "WITH entity, prop WHERE prop IS NOT NULL "
+        #     # will check the property for each of the entity labels,
+        #     # except the reserved ones __Entity__ and __KGBuilder__
+        #     "UNWIND labels(entity) as lab  "
+        #     "WITH lab, prop, entity WHERE NOT lab IN ['__Entity__', '__KGBuilder__'] "
+        #     # aggregate based on property value and label
+        #     # collect all entities with exact same property and label
+        #     # in the 'entities' list
+        #     "WITH prop, lab, collect(entity) AS entities "
+        #     # merge all entities into a single node
+        #     # * merge relationships: if the merged entities have a relationship of same
+        #     # type to the same target node, these relationships are merged
+        #     # otherwise relationships are just attached to the newly created node
+        #     # * properties: if the two entities have the same property key with
+        #     # different values, only one of them is kept in the created node
+        #     "CALL apoc.refactor.mergeNodes(entities,{ "
+        #     " properties:'discard', "
+        #     f" mergeRels:{self.merge_relationships} "
+        #     "}) "
+        #     "YIELD node "
+        #     "RETURN count(node) as c "
+        # )
         merge_nodes_query = (
             f"{match_query} "
-            f"WITH entity, entity.{self.resolve_property} as prop "
-            # keep only entities for which the resolve_property (name) is not null
-            "WITH entity, prop WHERE prop IS NOT NULL "
-            # will check the property for each of the entity labels,
-            # except the reserved ones __Entity__ and __KGBuilder__
-            "UNWIND labels(entity) as lab  "
-            "WITH lab, prop, entity WHERE NOT lab IN ['__Entity__', '__KGBuilder__'] "
-            # aggregate based on property value and label
-            # collect all entities with exact same property and label
-            # in the 'entities' list
-            "WITH prop, lab, collect(entity) AS entities "
-            # merge all entities into a single node
-            # * merge relationships: if the merged entities have a relationship of same
-            # type to the same target node, these relationships are merged
-            # otherwise relationships are just attached to the newly created node
-            # * properties: if the two entities have the same property key with
-            # different values, only one of them is kept in the created node
+            "WITH entity "
+            "UNWIND labels(entity) as lab "
+            "WITH lab, entity WHERE NOT lab IN $exclude_labels "
+            f"WITH lab, entity, CASE WHEN $resolve_properties IS NOT NULL AND $resolve_properties[lab] IS NOT NULL THEN entity[$resolve_properties[lab]] ELSE entity.name END as prop "
+            "WITH lab, prop, collect(entity) AS entities "
+            "WHERE size(entities) > 1 "
             "CALL apoc.refactor.mergeNodes(entities,{ "
             " properties:'discard', "
             f" mergeRels:{self.merge_relationships} "
@@ -132,10 +149,13 @@ class SinglePropertyExactMatchResolver(EntityResolver):
             "YIELD node "
             "RETURN count(node) as c "
         )
+
+        parameters = {
+            "resolve_properties": self.resolve_properties,
+            "exclude_labels": ["__Entity__", "__KGBuilder__"],
+        }
         records, _, _ = await execute_query(
-            self.driver,
-            merge_nodes_query,
-            database_=self.database,
+            self.driver, merge_nodes_query, database_=self.database, **parameters
         )
         number_of_created_nodes = records[0].get("c")
 
@@ -166,7 +186,7 @@ class SinglePropertyExactMatchResolver(EntityResolver):
         UNWIND toDelete AS rel
         DELETE rel
         """
-        
+
         records, _, _ = await execute_query(
             self.driver,
             query,

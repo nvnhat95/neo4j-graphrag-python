@@ -8,17 +8,25 @@ from typing import Any, Callable, Dict, Optional
 
 import neo4j
 from neo4j.exceptions import CypherSyntaxError, DriverError, Neo4jError
-from neo4j_graphrag.exceptions import (RetrieverInitializationError,
-                                       SchemaFetchError, SearchValidationError,
-                                       Text2CypherRetrievalError)
+from neo4j_graphrag.exceptions import (
+    RetrieverInitializationError,
+    SchemaFetchError,
+    SearchValidationError,
+    Text2CypherRetrievalError,
+)
 from neo4j_graphrag.generation.prompts import PromptTemplate
 from neo4j_graphrag.llm import LLMInterface
 from neo4j_graphrag.retrievers.base import Retriever
 from neo4j_graphrag.schema import get_schema
-from neo4j_graphrag.types import (LLMModel, Neo4jDriverModel, Neo4jSchemaModel,
-                                  RawSearchResult, RetrieverResultItem,
-                                  Text2CypherRetrieverModel,
-                                  Text2CypherSearchModel)
+from neo4j_graphrag.types import (
+    LLMModel,
+    Neo4jDriverModel,
+    Neo4jSchemaModel,
+    RawSearchResult,
+    RetrieverResultItem,
+    Text2CypherRetrieverModel,
+    Text2CypherSearchModel,
+)
 from pydantic import ValidationError
 from utils import get_entities_by_label
 
@@ -173,7 +181,7 @@ class Text2CypherRetriever(Retriever):
         # print("=== schema", self.neo4j_schema)
 
         params_to_use = {
-            "schema": self.neo4j_schema, # prompt_params.get("schema") or self.neo4j_schema,
+            "schema": self.neo4j_schema,  # prompt_params.get("schema") or self.neo4j_schema,
             "query_text": validated_data.query_text,
             "current_entities": prompt_params.get("current_entities")
             or get_entities_by_label(self.driver),
@@ -184,9 +192,10 @@ class Text2CypherRetriever(Retriever):
         logger.debug("Text2CypherRetriever prompt: %s", prompt)
 
         try:
+            # print("=== prompt", prompt)
             llm_result = self.llm.invoke(prompt)
             t2c_query = llm_result.content
-            print("=== t2c_query", t2c_query)
+            # print("=== t2c_query", t2c_query)
             logger.debug("Text2CypherRetriever Cypher query: %s", t2c_query)
             records, _, _ = self.driver.execute_query(query_=t2c_query)
         except CypherSyntaxError as e:

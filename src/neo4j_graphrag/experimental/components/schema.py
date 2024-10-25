@@ -22,12 +22,11 @@ from neo4j_graphrag.exceptions import SchemaValidationError
 from neo4j_graphrag.experimental.pipeline.component import Component, DataModel
 
 
-class SchemaProperty(BaseModel):
+class SchemaBaseProperty(BaseModel):
     """
     Represents a property on a node or relationship in the graph.
     """
 
-    name: str = None
     # See https://neo4j.com/docs/cypher-manual/current/values-and-types/property-structural-constructed/#property-types
     type: Literal[
         "BOOLEAN",
@@ -45,6 +44,7 @@ class SchemaProperty(BaseModel):
     ] = "STRING"
     description: str = ""
 
+
 class SchemaEntity(BaseModel):
     """
     Represents a possible node in the graph.
@@ -52,7 +52,7 @@ class SchemaEntity(BaseModel):
 
     label: str
     description: str = ""
-    properties: List[SchemaProperty] = []
+    properties: List[SchemaBaseProperty] = []
 
 
 class SchemaRelation(BaseModel):
@@ -62,7 +62,7 @@ class SchemaRelation(BaseModel):
 
     label: str
     description: str = ""
-    properties: List[SchemaProperty] = []
+    properties: List[SchemaBaseProperty] = []
 
 
 class SchemaConfig(DataModel):
@@ -70,14 +70,14 @@ class SchemaConfig(DataModel):
     Represents possible relationships between entities and relations in the graph.
     """
 
-    entities: Dict[str, Dict[str, Any]]
-    relations: Dict[str, Dict[str, Any]]
+    entities: List
+    relations: List
     potential_schema: List[Tuple[str, str, str]]
 
     @model_validator(mode="before")
     def check_schema(cls, data: Dict[str, Any]) -> Dict[str, Any]:
-        entities = data.get("entities", {}).keys()
-        relations = data.get("relations", {}).keys()
+        entities = [entity.label for entity in data.get("entities", [])]
+        relations = [relation.label for relation in data.get("relations", [])]
         potential_schema = data.get("potential_schema", [])
 
         for entity1, relation, entity2 in potential_schema:
@@ -99,31 +99,41 @@ class SchemaConfig(DataModel):
     def __str__(self):
         def format_schema(entities, relations, potential_schema):
             # Format entities
-            entities_str = "entities = [\n"
-            for key, value in entities.items():
-                entities_str += f"\t{key}: {value['description']}\n"
-            entities_str += "]\n"
-            
+            entities_str = "entities:\n"
+            for entity in entities:
+                entities_str += (
+                    f"\t{entity.label}:\n\t\tdescription: {entity.description}\n"
+                )
+                if entity.properties:
+                    entities_str += "\t\tpossible properties:\n"
+                    for prop in entity.properties:
+                        entities_str += f"\t\t\t{str(prop)}\n"
+                else:
+                    entities_str += "\t\tpossible properties: None\n"
+
             # Format relations
-            relations_str = "relations = [\n"
-            for key, value in relations.items():
-                relations_str += f"\t{key}: {value['description']}\n"
-                if value.get('properties'):
-                    relations_str += "\t\tproperties:[\n"
-                    for prop in value['properties']:
-                        relations_str += f'\t\t\t{str(prop)}\n'
-                    relations_str += "\t\t]\n"
-            relations_str += "]\n"
-            
+            relations_str = "relations:\n"
+            for relation in relations:
+                relations_str += (
+                    f"\t{relation.label}:\n\t\tdescription: {relation.description}\n"
+                )
+                if relation.properties:
+                    relations_str += "\t\tpossible properties:\n"
+                    for prop in relation.properties:
+                        relations_str += f"\t\t\t{str(prop)}\n"
+                else:
+                    relations_str += "\t\tpossible properties: None\n"
+
             # Format potential relations
-            potential_relations_str = "potential_relations = [\n"
+            potential_relations_str = "potential_schemas:\n"
             for rel in potential_schema:
-                potential_relations_str += f"\t({rel[0]}, {rel[1]}, {rel[2]}),\n"
-            potential_relations_str += "]\n"
-            
+                potential_relations_str += f"\t({rel[0]}, {rel[1]}, {rel[2]})\n"
+
             return entities_str + relations_str + potential_relations_str
 
-        return format_schema(self.entities, self.relations, self.potential_schema)
+        schema_str = format_schema(self.entities, self.relations, self.potential_schema)
+        # print("== schema ==\n", schema_str)
+        return schema_str
 
 
 class SchemaBuilder(Component):
@@ -187,8 +197,8 @@ class SchemaBuilder(Component):
 
     @staticmethod
     def create_schema_model(
-        entities: List[SchemaEntity],
-        relations: List[SchemaRelation],
+        entities: List,
+        relations: List,
         potential_schema: List[Tuple[str, str, str]],
     ) -> SchemaConfig:
         """
@@ -203,15 +213,10 @@ class SchemaBuilder(Component):
         Returns:
             SchemaConfig: A configured schema object.
         """
-        entity_dict = {entity.label: entity.model_dump() for entity in entities}
-        relation_dict = {
-            relation.label: relation.model_dump() for relation in relations
-        }
-
         try:
             return SchemaConfig(
-                entities=entity_dict,
-                relations=relation_dict,
+                entities=entities,
+                relations=relations,
                 potential_schema=potential_schema,
             )
         except (ValidationError, SchemaValidationError) as e:
@@ -220,8 +225,8 @@ class SchemaBuilder(Component):
     @validate_call
     async def run(
         self,
-        entities: List[SchemaEntity],
-        relations: List[SchemaRelation],
+        entities: List,
+        relations: List,
         potential_schema: List[Tuple[str, str, str]],
     ) -> SchemaConfig:
         """
@@ -235,4 +240,5 @@ class SchemaBuilder(Component):
         Returns:
             SchemaConfig: A configured schema object, constructed asynchronously.
         """
-        return self.create_schema_model(entities, relations, potential_schema)
+        schema = self.create_schema_model(entities, relations, potential_schema)
+        return schema

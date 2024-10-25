@@ -368,6 +368,7 @@ def get_metadata_filter(
         contains the query parameters
     """
     param_store = ParameterStore()
-    return _construct_metadata_filter(
-        filter, param_store, node_alias=node_alias
-    ), param_store.params
+    return (
+        _construct_metadata_filter(filter, param_store, node_alias=node_alias),
+        param_store.params,
+    )

@@ -16,14 +16,15 @@ from typing import Any, Dict, List, Optional, Union
 from neo4j_graphrag.exceptions import LLMGenerationError
 from neo4j_graphrag.experimental.components.pdf_loader import DocumentInfo
 from neo4j_graphrag.experimental.components.schema import SchemaConfig
-from neo4j_graphrag.experimental.components.types import (Neo4jGraph,
-                                                          Neo4jNode,
-                                                          Neo4jRelationship,
-                                                          TextChunk,
-                                                          TextChunks)
+from neo4j_graphrag.experimental.components.types import (
+    Neo4jGraph,
+    Neo4jNode,
+    Neo4jRelationship,
+    TextChunk,
+    TextChunks,
+)
 from neo4j_graphrag.experimental.pipeline.component import Component
-from neo4j_graphrag.generation.prompts import (ERExtractionTemplate,
-                                               PromptTemplate)
+from neo4j_graphrag.generation.prompts import ERExtractionTemplate, PromptTemplate
 from neo4j_graphrag.llm import LLMInterface
 from pydantic import ValidationError, validate_call
 
@@ -340,9 +341,10 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
         current_entities: Any = None,
     ) -> Neo4jGraph:
         """Run entity extraction for a given text chunk."""
+
         prompt = self.prompt_template.format(
             text=chunk.text,
-            schema=schema.model_dump(),
+            schema=str(schema),
             examples=examples,
             current_entities=current_entities,
         )
@@ -369,10 +371,10 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
                         f"LLM response is not valid JSON {llm_result.content} for chunk_index={chunk.index}"
                     )
                 result = {"nodes": [], "relationships": []}
-        
+
         print("=" * 30)
         print(result)
-        
+
         try:
             chunk_graph = Neo4jGraph(**result)
         except ValidationError as e:
@@ -464,6 +466,7 @@ class LLMEntityRelationExtractor(EntityRelationExtractor):
                 document_id = document_node.id
         lexical_graph = Neo4jGraph(nodes=nodes, relationships=[])
         schema = schema or SchemaConfig(entities={}, relations={}, potential_schema=[])
+
         examples = examples or ""
         run_id = str(datetime.now().timestamp())
         sem = asyncio.Semaphore(self.max_concurrency)
