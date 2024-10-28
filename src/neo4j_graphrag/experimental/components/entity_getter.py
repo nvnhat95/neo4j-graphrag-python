@@ -92,12 +92,17 @@ def find_most_similar_entities(
 
 def get_relevant_entities_by_label(driver, query: str, ignore_chunks=True):
     all_entities = get_entities_by_label(driver, ignore_chunks)
+    return all_entities
+
+    # TODO: revise this.
+    # currently, if we only feed relevant entities to the LLM,
+    # the LLM will not be able to generate a proper query.
     relevant_entities = {}
     for label, entities in all_entities.items():
         relevant_ents = find_most_similar_entities(query, entities, min_score=0.1)
         if relevant_ents:
             relevant_entities[label] = relevant_ents
-    return all_entities
+    return relevant_entities
 
 
 class GetEntitiesComponent(Component):
