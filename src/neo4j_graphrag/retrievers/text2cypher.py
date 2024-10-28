@@ -28,7 +28,9 @@ from neo4j_graphrag.types import (
     Text2CypherSearchModel,
 )
 from pydantic import ValidationError
-from utils import get_entities_by_label
+from neo4j_graphrag.experimental.components.entity_getter import (
+    get_relevant_entities_by_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ class Text2CypherTemplate(PromptTemplate):
 Schema:
 {schema}
 
-List of current entities in knowledge graph:
+List of relevant entities in knowledge graph:
 {current_entities}
 
 Input:
@@ -48,6 +50,7 @@ Input:
 Do not use any properties or relationships not included in the schema.
 Do not include triple backticks ``` or any additional text except the generated Cypher statement in your response.
 There might be multiple relationships between two entities.
+You can write a simple Cypher query to retrieve redundant data instead of using a complex query.
 
 Cypher query:
 """
@@ -184,18 +187,20 @@ class Text2CypherRetriever(Retriever):
             "schema": self.neo4j_schema,  # prompt_params.get("schema") or self.neo4j_schema,
             "query_text": validated_data.query_text,
             "current_entities": prompt_params.get("current_entities")
-            or get_entities_by_label(self.driver),
+            or get_relevant_entities_by_label(self.driver, validated_data.query_text),
         }
+
+        print("=== current_entities", params_to_use["current_entities"])
 
         prompt = prompt_template.format(**params_to_use)
 
         logger.debug("Text2CypherRetriever prompt: %s", prompt)
 
         try:
-            # print("=== prompt", prompt)
+            print("=== Text2CypherRetriever prompt", prompt)
             llm_result = self.llm.invoke(prompt)
             t2c_query = llm_result.content
-            # print("=== t2c_query", t2c_query)
+            print("=== Text2CypherRetriever t2c_query", t2c_query)
             logger.debug("Text2CypherRetriever Cypher query: %s", t2c_query)
             records, _, _ = self.driver.execute_query(query_=t2c_query)
         except CypherSyntaxError as e:

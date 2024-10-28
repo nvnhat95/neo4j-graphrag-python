@@ -130,7 +130,10 @@ class GraphRAG:
         )
         context = "\n".join(item.content for item in retriever_result.items)
         prompt = self.prompt_template.format(
-            query_text=query_text, context=context, examples=validated_data.examples
+            query_text=query_text,
+            cypher=retriever_result.metadata["cypher"],
+            context=context,
+            examples=validated_data.examples,
         )
         logger.debug(f"RAG: retriever_result={retriever_result}")
         logger.debug(f"RAG: prompt={prompt}")
